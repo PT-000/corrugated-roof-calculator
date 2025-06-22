@@ -229,7 +229,7 @@ def main():
     
     A = st.sidebar.slider(
         "Flat Bottom Width (A) - mm", 
-        min_value=10, max_value=200, value=50, step=1,
+        min_value=10, max_value=200, value=90, step=1,
         help="Width of the flat bottom section"
     )
     
