@@ -98,6 +98,31 @@ def calculate_corrugated_profile(A, D, degree, total_length):
     return (x_profile, z_profile, leftover_profile_x, leftover_profile_z, 
             N, module_physical_length, L, slant_length, used_length, leftover)
 
+def calculate_bending_cost(N, leftover_x, leftover_z, cost_per_bend=50):
+    """Calculate the total cost for bending operations"""
+    
+    # Count bends for complete modules
+    # Each complete module has 3 bends (flat-to-up, up-to-down, down-to-flat)
+    complete_module_bends = N * 3
+    
+    # Count bends for leftover material
+    leftover_bends = 0
+    if leftover_x and leftover_z:
+        # Count the number of direction changes in leftover profile
+        if len(leftover_z) > 0:
+            for i in range(len(leftover_z)):
+                if leftover_z[i] > 0:  # If there's any height, there's at least one bend
+                    leftover_bends += 0
+                    # If we reach peak and come down, that's another bend
+                    if i > 0 and leftover_z[i] > leftover_z[i-1]:
+                        leftover_bends += 0
+                    break
+    
+    total_bends = complete_module_bends + leftover_bends
+    total_cost = total_bends * cost_per_bend
+    
+    return total_bends, total_cost, complete_module_bends, leftover_bends
+
 def create_main_plot(x_profile, z_profile, leftover_x, leftover_z, A, D, N, efficiency, design_failed):
     """Create the main corrugated profile plot"""
     fig, ax = plt.subplots(figsize=(14, 6))
@@ -156,6 +181,17 @@ def create_cross_section_plot(A, D, L, degree):
     ax.fill(x_cross, z_cross, alpha=0.2, color='lightblue', label='Cross-section')
     ax.plot(x_cross, z_cross, 'b-', linewidth=3)
     
+    # Mark bending points with red dots
+    bend_points_x = [A, A + L, A + 2*L]
+    bend_points_z = [0, D, 0]
+    ax.scatter(bend_points_x, bend_points_z, color='red', s=100, zorder=5, 
+               label='Bend Points (50฿ each)')
+    
+    # Add bend numbers
+    for i, (x, z) in enumerate(zip(bend_points_x, bend_points_z)):
+        ax.annotate(f'{i+1}', (x, z), xytext=(5, 5), textcoords='offset points',
+                   color='red', fontweight='bold', fontsize=12)
+    
     # Dimensions
     # Flat bottom dimension (A)
     ax.annotate('', xy=(0, -D*0.18), xytext=(A, -D*0.18),
@@ -173,6 +209,7 @@ def create_cross_section_plot(A, D, L, degree):
     ax.set_xlabel('Width (mm)')
     ax.set_ylabel('Height (mm)')
     ax.grid(True, alpha=0.2)
+    ax.legend()
     ax.set_aspect('equal')
     
     # Set limits
@@ -185,7 +222,7 @@ def create_cross_section_plot(A, D, L, degree):
 # Main Streamlit App
 def main():
     st.title("🏠 Corrugated Roof Calculator")
-    st.markdown("Calculate corrugated roofing profiles with material optimization")
+    st.markdown("Calculate corrugated roofing profiles with material optimization and bending cost analysis")
     
     # Sidebar controls
     st.sidebar.header("Design Parameters")
@@ -214,10 +251,22 @@ def main():
         help="Available sheet material length"
     )
     
+    # Cost parameters
+    st.sidebar.header("Cost Parameters")
+    cost_per_bend = st.sidebar.number_input(
+        "Cost per Bend (฿)", 
+        min_value=1, max_value=1000, value=50, step=1,
+        help="Cost in Thai Baht for each bending operation"
+    )
+    
     # Calculate profile
     (x_profile, z_profile, leftover_x, leftover_z, N, module_length, 
      L, slant_length, used_length, leftover) = calculate_corrugated_profile(
         A, D, degree, total_length)
+    
+    # Calculate bending costs
+    total_bends, total_cost, complete_bends, leftover_bends = calculate_bending_cost(
+        N, leftover_x, leftover_z, cost_per_bend)
     
     # Check if design failed
     design_failed = used_length > total_length
@@ -233,6 +282,15 @@ def main():
     if design_failed:
         st.error("⚠️ Design Failure: Required material exceeds available sheet length!")
     
+    # Cost summary at the top
+    st.subheader("💰 Bending Cost Summary")
+    cost_col1, cost_col2, cost_col3, cost_col4 = st.columns(4)
+    
+    with cost_col1:
+        st.metric("Total Bends", f"{total_bends}")
+    with cost_col2:
+        st.metric("Total Cost", f"฿{total_cost:,}")
+    
     # Main plots
     col1, col2 = st.columns([2, 1])
     
@@ -247,9 +305,9 @@ def main():
         cross_fig = create_cross_section_plot(A, D, L, degree)
         st.pyplot(cross_fig, use_container_width=True)
     
-    # Specifications in two columns
+    # Specifications in three columns
     st.subheader("Specifications")
-    spec_col1, spec_col2 = st.columns(2)
+    spec_col1, spec_col2, spec_col3 = st.columns(3)
     
     with spec_col1:
         # Determine styling based on failure
@@ -309,9 +367,28 @@ def main():
         - Bending Strength Factor: {(D**2/peak_to_peak):.1f}
         
         **MANUFACTURING NOTES:**
-        - Bend Radius: {(A/4):.1f} mm (recommended)
-        - Tooling Angle: {degree}° ± 2°
         - Material Utilization: {((total_length-leftover)/total_length*100):.1f}%
+        """)
+        st.markdown("</div>", unsafe_allow_html=True)
+    
+    with spec_col3:
+        st.markdown("""
+        <div style="background-color: #f0f8ff; padding: 15px; border-radius: 10px; border: 2px solid #4169e1;">
+        <h4 style="color: #4169e1;">💰 Cost Analysis</h4>
+        """, unsafe_allow_html=True)
+        
+        cost_per_module = (3 * cost_per_bend) if N > 0 else 0
+        cost_per_meter = (total_cost / (coverage_width/1000)) if coverage_width > 0 else 0
+        
+        st.markdown(f"""
+        **BENDING OPERATIONS:**
+        - Cost per Bend: ฿{cost_per_bend}
+        - Bends per Module: 3
+        - Cost per Module: ฿{cost_per_module}
+        - Complete Module Bends: {complete_bends}
+        
+        **COST BREAKDOWN:**
+        - Complete Modules: ฿{complete_bends * cost_per_bend:,}
         """)
         st.markdown("</div>", unsafe_allow_html=True)
 
